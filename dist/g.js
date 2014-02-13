@@ -909,27 +909,11 @@ var G = this.G = {};
 
     util.path ={
         idToUrl: function ( id ) {
-            var url, version, now;
             if ( util.path.isAbsolute( id ) ) {
                 return id;
             }
 
-            version = G.config( 'version' );
-
-            if (version) {
-                if ( ! version[ id ] ) {
-                    now = Date.now();
-                    version = now -  ( now % G.config( 'cacheExpire' ) );
-                } else {
-                    version = version[ id ];
-                }
-
-                url = id.replace( /\.(\w*)$/, '-' + version + '.$1');
-            } else {
-                url = id;
-            }
-
-            return util.path.realpath( G.config('baseUrl') + url );
+            return util.path.realpath( G.config('baseUrl') + id );
         },
         dirname: function ( url ) {
             var match = url.match(DIRNAME_RE);
@@ -972,6 +956,24 @@ var G = this.G = {};
             }
 
             return ret.join('/');
+        },
+        map: function (url) {
+            var newUrl = url;
+            var maps = G.config('map') || [];
+            var i = 0;
+            var map;
+
+            for (; i < maps.length; i++) {
+                map = maps[i];
+
+                newUrl = typeof map === 'function' ? map(url) : url.replace(map[0], map[1]);
+
+                if (newUrl !== url) {
+                    break;
+                }
+            }
+
+            return newUrl;
         }
     };
 }) (G);
@@ -1328,7 +1330,7 @@ G.when = function ( defers ){
     Module.fetch = function ( module ) {
         var loader = G.Loader.match( module.id ) || G.Loader.match('.js');
 
-        module.url = util.path.idToUrl( module.id );
+        module.url = util.path.map( util.path.idToUrl( module.id ) );
 
         loader.call( {
             fail: function ( err ) {
