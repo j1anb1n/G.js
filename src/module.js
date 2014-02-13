@@ -190,7 +190,7 @@
     Module.fetch = function ( module ) {
         var loader = G.Loader.match( module.id ) || G.Loader.match('.js');
 
-        module.url = util.path.idToUrl( module.id );
+        module.url = util.path.map( util.path.idToUrl( module.id ) );
 
         loader.call( {
             fail: function ( err ) {
