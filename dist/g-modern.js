@@ -637,7 +637,7 @@ G.when = function ( defers ){
             }, 0); // Begin after node insertion
         }
 
-        module.status = G.STATUS.FETCHING;
+        module.status = G.Module.STATUS.FETCHING;
         head.appendChild(node);
 
         timer = setTimeout(function () {
@@ -647,10 +647,11 @@ G.when = function ( defers ){
 
         function onCSSLoad() {
             clearTimeout( timer );
-            if (module.status === G.STATUS.FETCHING) {
-                module.status = G.STATUS.FETCHED;
+            if (module.status === G.Module.STATUS.FETCHING) {
+                module.status = G.Module.STATUS.FETCHED;
             }
-            self.done();
+            self.compile();
+            self.onLoad();
         }
 
         function poll(node, callback) {
