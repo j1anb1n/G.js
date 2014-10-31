@@ -101,7 +101,6 @@
 
     Module.cache = {};
     Module.defers = {};
-    Module.queue = [];
     Module.holdedRequest = [];
     Module.STATUS = STATUS;
 
@@ -198,16 +197,6 @@
             },
             compile: function () {
                 Module.compile( module );
-            },
-            onLoad: function () {
-                if ( Module.queue.length ) {
-                    Module.queue
-                        .filter(function (module) {
-                            return module.status < STATUS.FETCHING;
-                        })
-                        .forEach( Module.fetch );
-                    Module.queue = [];
-                }
             },
             holdRequest: function () {
                 holdRequest ++;

@@ -28,8 +28,6 @@
                 if ( isCmb ) {
                     self.flushRequest();
                 }
-
-                self.onLoad();
             }
         } );
     });

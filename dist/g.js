@@ -1241,7 +1241,6 @@ G.when = function ( defers ){
 
     Module.cache = {};
     Module.defers = {};
-    Module.queue = [];
     Module.holdedRequest = [];
     Module.STATUS = STATUS;
 
@@ -1339,16 +1338,6 @@ G.when = function ( defers ){
             compile: function () {
                 Module.compile( module );
             },
-            onLoad: function () {
-                if ( Module.queue.length ) {
-                    Module.queue
-                        .filter(function (module) {
-                            return module.status < STATUS.FETCHING;
-                        })
-                        .forEach( Module.fetch );
-                    Module.queue = [];
-                }
-            },
             holdRequest: function () {
                 holdRequest ++;
             },
@@ -1442,8 +1431,6 @@ G.when = function ( defers ){
                 if ( isCmb ) {
                     self.flushRequest();
                 }
-
-                self.onLoad();
             }
         } );
     });
@@ -1538,7 +1525,6 @@ G.when = function ( defers ){
                 module.status = G.Module.STATUS.FETCHED;
             }
             self.compile();
-            self.onLoad();
         }
 
         function poll(node, callback) {

@@ -49,7 +49,6 @@
                 module.status = G.Module.STATUS.FETCHED;
             }
             self.compile();
-            self.onLoad();
         }
 
         function poll(node, callback) {

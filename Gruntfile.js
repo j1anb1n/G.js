@@ -39,6 +39,16 @@ module.exports = function(grunt) {
                         "src/module.js",
                         "src/loader/amd.js",
                         "src/loader/css.js"
+                    ],
+                    'dist/g-localstorage.js': [
+                        "src/boot.js",
+                        "src/config.js",
+                        "src/util.js",
+                        "src/deferred.js",
+                        "src/loader.js",
+                        "src/module.js",
+                        "src/loader/amd.localstorage.js",
+                        "src/loader/css.js"
                     ]
                 }
             },
