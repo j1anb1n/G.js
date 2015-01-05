@@ -22,7 +22,17 @@ define('specs/loader/amd/task.js', ['test.js'], function (require, exports, modu
                         test.assert(x.name === 'x', 'normal module');
                         test.assert(y.name === 'y', 'normal module');
                         test.assert(z.name === 'z', 'normal module');
-                        done();
+
+                        require.async('specs/loader/amd/a.js')
+                            .done(function (a) {
+                                test.assert(a.name === 'a', 'promisify loader');
+
+                                G.use(['specs/loader/amd/a.js', 'specs/loader/amd/b.js'])
+                                    .done(function (a, b) {
+                                        test.assert(a.name === 'a' && b.name === 'b', 'multiple promisify loader is ok');
+                                        done();
+                                    });
+                            });
                     }
                 );
             });

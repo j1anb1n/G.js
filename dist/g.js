@@ -906,6 +906,151 @@ var G = this.G = {};
     var util = G.util = {};
     var MULTIPLE_SLASH_RE = /([^:\/])\/\/+/g;
     var DIRNAME_RE = /.*(?=\/.*$)/;
+    var doc = document;
+    var head = doc.head || doc.getElementsByTagName( 'head' )[0] || doc.documentElement;
+    var baseElement = head.getElementsByTagName( 'base' )[0];
+
+    // `onload` event is supported in WebKit since 535.23
+    // Ref:
+    //  - https://bugs.webkit.org/show_activity.cgi?id=38995
+    var isOldWebKit = +navigator.userAgent.replace(/.*AppleWebKit\/(\d+)\..*/, '$1') < 536;
+
+    // `onload/onerror` event is supported since Firefox 9.0
+    // Ref:
+    //  - https://bugzilla.mozilla.org/show_bug.cgi?id=185236
+    //  - https://developer.mozilla.org/en/HTML/Element/link#Stylesheet_load_events
+    var isOldFirefox = window.navigator.userAgent.indexOf('Firefox') > 0 &&
+        !('onload' in document.createElement('link'));
+
+
+    util.getVersion = function (id) {
+        var versions = G.config('version') || {};
+        var version = versions[id];
+        var expire = G.config('expire') || 604800;
+        var now = Date.now() / 1000;
+        if (!version) {
+            version = parseInt(now - (now % expire), 10);
+        }
+
+        return version;
+    };
+
+    util.loadScript = function ( params, callback ) {
+        var node  = doc.createElement( 'script' );
+        var done  = false;
+        var timer = null;
+        params = params || {};
+        node.setAttribute( 'type', 'text/javascript' );
+        node.setAttribute( 'charset', 'utf-8' );
+        node.setAttribute( 'async', true );
+        callback = callback || function () {};
+        if ( params.url ) {
+            node.src = params.url;
+        } else if (params.text) {
+            node.text = params.text;
+        }
+
+        node.onload = node.onreadystatechange = function() {
+            if ( !done &&
+                ( !this.readyState ||
+                    this.readyState === 'loaded' ||
+                    this.readyState === 'complete'
+                )
+            ){
+                // clear
+                done = true;
+                clearTimeout( timer );
+                node.onload = node.onreadystatechange = null;
+                callback();
+            }
+        };
+
+        node.onerror = function(e){
+            clearTimeout( timer );
+            head.removeChild( node );
+            callback(e);
+        };
+
+        timer = setTimeout( function () {
+            head.removeChild( node );
+            callback(new Error('time out'));
+        }, 30000 ); // 30s
+
+        if (baseElement) {
+            head.insertBefore(node, baseElement);
+        } else {
+            head.appendChild(node);
+        }
+
+        return node;
+    };
+
+    util.loadStyle = function ( params, callback ) {
+        var node = doc.createElement( 'link' );
+        var timer;
+        node.setAttribute( 'type', 'text/css' );
+        node.setAttribute( 'href', params.url );
+        node.setAttribute( 'rel', 'stylesheet' );
+
+        if ( !isOldWebKit && !isOldFirefox ) {
+            node.onload = onCSSLoad;
+            node.onerror = function () {
+                clearTimeout( timer );
+                head.removeChild( node );
+                callback(new Error( 'Load Fail' ));
+            };
+        } else {
+            setTimeout(function() {
+                poll(node, onCSSLoad);
+            }, 0); // Begin after node insertion
+        }
+
+        head.appendChild(node);
+
+        timer = setTimeout(function () {
+            head.removeChild(node);
+            callback( new Error( 'Load timeout' ) );
+        }, 30000); // 30s
+
+        function onCSSLoad() {
+            clearTimeout( timer );
+            callback();
+        }
+
+        function poll(node, callback) {
+            var isLoaded;
+            if ( isOldWebKit ) {                // for WebKit < 536
+                if ( node.sheet ) {
+                    isLoaded = true;
+                }
+            } else if ( node.sheet ) {       // for Firefox < 9.0
+                try {
+                    if ( node.sheet.cssRules ) {
+                        isLoaded = true;
+                    }
+                } catch ( ex ) {
+                // The value of `ex.name` is changed from
+                // 'NS_ERROR_DOM_SECURITY_ERR' to 'SecurityError' since Firefox 13.0
+                // But Firefox is less than 9.0 in here, So it is ok to just rely on
+                // 'NS_ERROR_DOM_SECURITY_ERR'
+                    if (ex.name === 'NS_ERROR_DOM_SECURITY_ERR') {
+                        isLoaded = true;
+                    }
+                }
+            }
+
+            setTimeout(function() {
+                if (isLoaded) {
+                    // Place callback in here due to giving time for style rendering.
+                    callback();
+                } else {
+                    poll(node, callback);
+                }
+            }, 1);
+        }
+
+        return node;
+    };
 
     util.path ={
         idToUrl: function ( id ) {
@@ -1066,6 +1211,7 @@ G.Deferred = function () {
 
     function dispatch(cbs) {
         /*jshint loopfunc:true*/
+        var cb;
         while( (cb = cbs.shift()) || (cb = callbacks.always.shift()) ) {
             setTimeout( (function ( fn ) {
                 return function () {
@@ -1085,19 +1231,21 @@ G.when = function ( defers ){
     var ret     = G.Deferred();
     var len     = defers.length;
     var count   = 0;
+    var results = [];
 
     if (!len) {
         return ret.resolve().promise();
     }
 
-    defers.forEach(function (defer) {
+    defers.forEach(function (defer, i) {
         defer
-            .fail(function () {
-                ret.reject();
+            .fail(function (err) {
+                ret.reject(err);
             })
-            .done(function () {
+            .done(function (result) {
+                results[i] = result;
                 if (++count === len) {
-                    ret.resolve();
+                    ret.resolve.apply(ret, results);
                 }
             });
     });
@@ -1109,39 +1257,17 @@ G.when = function ( defers ){
     var loaders = [];
 
     G.Loader = {
-        register: function (re, loader) {
-            var fn = function (url) {
-                if (re.test(url)) {
-                    return loader;
-                }
-
-                return false;
-            };
-
-            loaders.push(fn);
+        buffer: {},
+        dispatch: function () {
+            loaders.forEach(function (loader) {
+                loader();
+            });
         },
-        match: function (url) {
-            var i = 0;
-            var match;
-
-            do {
-                match = loaders[i](url);
-
-                if (match) {
-                    break;
-                }
-
-                i ++;
-            } while (i < loaders.length);
-
-            return match;
+        addLoader: function (loader) {
+            loaders.push(loader);
         }
     };
 })(G);
-// Thanks To:
-//      - My girlfriend
-//      - http://github.com/seajs/seajs
-
 (function ( global, G, util ) {
     var STATUS = {
         'ERROR'     : -2,   // The module throw an error while compling
@@ -1157,31 +1283,48 @@ G.when = function ( defers ){
 
     var config = G.config();
     var guid   = 0;
-    var holdRequest = 0;
 
-    function use ( deps, cb ) {
+    function use ( deps, cb, context ) {
         var module = Module.getOrCreate( 'module_' + (guid++) );
         var id     = module.id;
+        var defer  = G.Deferred();
 
         module.isAnonymous = true;
 
-        Module.save( id, deps, cb, this.context );
+        if (!Array.isArray(deps)) {
+            deps = [deps];
+        }
 
-        return Module.defers[id].promise();
+        Module.save( id, deps, cb, context );
+
+        Module.defers[id]
+            .done(function () {
+                defer.resolve.apply(defer, module.dependencies.map(function (dep) {
+                    return dep.exports;
+                }));
+            })
+            .fail(function (err) {
+                defer.reject(err);
+            });
+
+        return defer.promise();
     }
 
     G.use = function (deps, cb) {
-        return use.call({context: window.location.href}, deps, cb);
+        return use( deps, cb, window.location.href );
     };
 
     global.define = function ( id, deps, fn ) {
         if (typeof id !== 'string') {
-            throw new Error( 'ID must be a string' );
+            throw new Error( 'module.id must be a string' );
         }
+
         if (!fn) {
             fn = deps;
             deps = [];
         }
+
+        delete G.Loader.buffer[ id ];
 
         if (Module.cache[ id ] && Module.cache[ id ].status >= STATUS.SAVED) {
             return;
@@ -1225,7 +1368,7 @@ G.when = function ( defers ){
         };
 
         require.async = function (deps, cb) {
-            return use.call({context: context}, deps, cb);
+            return use( deps, cb, context );
         };
 
         // TODO: implement require.paths
@@ -1241,7 +1384,6 @@ G.when = function ( defers ){
 
     Module.cache = {};
     Module.defers = {};
-    Module.holdedRequest = [];
     Module.STATUS = STATUS;
 
     Module.getOrCreate = function (id) {
@@ -1254,20 +1396,6 @@ G.when = function ( defers ){
             Module.defers[id] = G.Deferred();
         }
         return Module.cache[id];
-    };
-
-    Module.wait  = function ( module ) {
-        var deps = module.dependencies.map( function ( dep ) {
-            return Module.defers[dep.id];
-        } );
-
-        G.when( deps )
-            .done( function () {
-                Module.compile( module );
-            } )
-            .fail( function (msg) {
-                Module.fail( module, new Error( msg ) );
-            } );
     };
 
     Module.compile = function ( module ) {
@@ -1326,44 +1454,44 @@ G.when = function ( defers ){
         throw err;
     };
 
-    Module.fetch = function ( module ) {
-        var loader = G.Loader.match( module.id ) || G.Loader.match('.js');
-
-        module.url = util.path.map( util.path.idToUrl( module.id ) );
-
-        loader.call( {
-            fail: function ( err ) {
-                Module.fail( module, err );
-            },
-            compile: function () {
-                Module.compile( module );
-            },
-            holdRequest: function () {
-                holdRequest ++;
-            },
-            flushRequest: function () {
-                holdRequest --;
-                Module.holdedRequest
-                    .filter(function ( module ) {
-                        return module.status < STATUS.FETCHING;
-                    })
-                    .forEach( Module.fetch );
-
-                Module.holdedRequest = [];
-            }
-        }, module );
-    };
-
     Module.save = function ( id, deps, fn, context ) {
         var module = Module.getOrCreate( id );
+        var require = new Require( context );
 
-        deps = resolveDeps( deps, context );
+        var deps = deps.map( function (dep) {
+            return Module.getOrCreate( require.resolve( dep ) );
+        });
 
         module.dependencies = deps;
         module.factory      = fn;
         module.status       = STATUS.SAVED;
 
-        Module.wait( module );
+        deps = deps.map( function ( dep ) {
+            if (dep.status < STATUS.FETCHING) {
+                dep.status = STATUS.FETCHING;
+
+                dep.url = util.path.map( util.path.idToUrl( dep.id ) );
+
+                G.Loader.buffer[dep.id] = dep;
+            }
+
+            return Module.defers[dep.id];
+        } );
+
+        G.when( deps )
+            .done( function () {
+                Module.compile( module );
+            } )
+            .fail( function ( err ) {
+                Module.fail( module, err );
+            } );
+
+        // 将`G.Loader.dispatch`延迟到`script`标签的onLoad之后，
+        // 以避免一个`script`标签内多个`define`带来的依赖重复加载问题
+        // https://github.com/amdjs/amdjs-api/blob/master/AMD.md#transporting-more-than-one-module-at-a-time-
+        setTimeout(function () {
+            G.Loader.dispatch();
+        }, 0);
     };
 
     Module.remove = function (id) {
@@ -1372,193 +1500,134 @@ G.when = function ( defers ){
         delete Module.defers[module.id];
     };
 
-    // convert dep string to module object, and fetch if not loaded
-    function resolveDeps ( deps, context ) {
-        var require = new Require( context );
-
-        if (!Array.isArray(deps)) {
-            deps = [deps];
-        }
-
-        var modules = deps.map( function (dep) {
-            return Module.getOrCreate( require.resolve( dep ) );
-        });
-
-        var toFetch = modules
-            .filter(function ( m ) {
-                return m.status < STATUS.FETCHING;
-            });
-
-        if (holdRequest) {
-            Module.holdedRequest = Module.holdedRequest.concat( toFetch );
-        } else {
-            toFetch.forEach( Module.fetch );
-        }
-
-        return modules;
-    }
-
     G.Module = Module;
 
 }) (window, G, G.util);
 (function (G) {
-    var doc = document;
-    var head = doc.head || doc.getElementsByTagName( 'head' )[0] || doc.documentElement;
-    var baseElement = head.getElementsByTagName( 'base' )[0];
-    var CMB_RE = /\.cmb\.js$/;
+    G.Loader.addLoader(function () {
+        var modules = Object.keys(G.Loader.buffer);
 
-    G.Loader.register(/\.js/, function ( module ) {
-        var self  = this;
-        var isCmb = CMB_RE.test( module.id );
+        modules.forEach(function (module) {
+            if (!/\.css$/.test(module)) {
+                return;
+            }
 
-        module.status = G.Module.STATUS.FETCHING;
+            module = G.Loader.buffer[module];
+            delete G.Loader.buffer[module.id];
 
-        if ( isCmb ) {
-            self.holdRequest();
+            G.util.loadStyle( { url: module.url }, function () {
+                G.Module.compile( module );
+            });
+        });
+    });
+})(G);
+
+(function (G, global) {
+    var localStorage = window.localStorage || undefined;
+    var _define = global.define;
+    var getVersion = G.util.getVersion;
+
+    global.define = function (id, deps, fn) {
+        var module, content, version;
+
+        _define(id, deps, fn);
+        if (G.config('enableLocalstorage')) {
+
+            module  = G.Module.getOrCreate(id);
+            version = getVersion(module.id);
+            deps   = module.dependencies.map(function (dep) {
+                return '"' + dep.id + '"';
+            }).join(',');
+
+            content = 'define('+
+                            '"' + module.id + '",' +
+                            '['+ deps +'],' +
+                            module.factory.toString() +
+                      ');//# sourceURL=' + module.url;
+
+            try {
+                localStorage.setItem('FILE#' + module.id, version + '#__#' + content);
+            } catch (ex) {
+                // ignore
+            }
+        }
+    };
+
+    G.Loader.addLoader(function () {
+        var modules = Object.keys(G.Loader.buffer);
+
+        if (G.config('enableLocalstorage')) {
+            modules.forEach(function (module) {
+                var version = getVersion(module);
+                var content;
+
+                try {
+                    content = localStorage ? localStorage.getItem('FILE#' + module) : '';
+                    if (content && parseInt(content.split('#__#')[0], 10) === version) {
+                        content = content.split('#__#')[1];
+                    } else {
+                        return;
+                    }
+                } catch (ex) {
+                    try{
+                        localStorage.remoteItem('FILE#' + module);
+                    } catch (e) {}
+
+                    return;
+                }
+
+                delete G.Loader.buffer[module];
+
+                G.util.loadScript( { text: content } );
+            });
+        }
+    });
+})(G, window);
+(function (G) {
+    G.Loader.addLoader(function () {
+        var modules = Object.keys(G.Loader.buffer);
+        var getVersion = G.util.getVersion;
+        var version = 0;
+        var url;
+
+        if (!G.config('enableComboLoad') || modules.length <= 1) {
+            return;
         }
 
-        loadScript( module.url, function (err) {
-            if (err) {
-                self.fail( err );
-            } else {
-                if (module.status === G.Module.STATUS.FETCHING) {
-                    module.status = G.Module.STATUS.FETCHED;
+        version = 0;
+        url = modules.reduce(function (ret, module) {
+            var v = getVersion(module);
+
+            delete G.Loader.buffer[module];
+
+            version = v > version ? v : version;
+
+            ret.push(module);
+            return ret;
+        }, []);
+
+        url = G.config('comboServer') + url.sort().join(',') + '&v=' + version;
+
+        G.util.loadScript( { url: url } );
+    });
+})(G);
+(function (G) {
+    G.Loader.addLoader(function () {
+        var modules = Object.keys(G.Loader.buffer);
+
+        modules.forEach(function (id) {
+            var module = G.Loader.buffer[id];
+            delete G.Loader.buffer[id];
+
+            G.util.loadScript({ url: module.url }, function (err) {
+                if ( err ) {
+                    return G.Module.fail( module, err );
                 }
 
                 if ( module.status > 0 && module.status < G.Module.STATUS.SAVED ) {
-                    self.compile();
+                    G.Module.compile( module );
                 }
-                if ( isCmb ) {
-                    self.flushRequest();
-                }
-            }
-        } );
-    });
-
-    function loadScript (url, callback) {
-        var node  = doc.createElement( 'script' );
-        var done  = false;
-        var timer = setTimeout( function () {
-            head.removeChild( node );
-            callback( new Error( 'Load timeout' ) );
-        }, 30000 ); // 30s
-
-        node.setAttribute( 'type', 'text/javascript' );
-        node.setAttribute( 'charset', 'utf-8' );
-        node.setAttribute( 'src', url );
-        node.setAttribute( 'async', true );
-
-        node.onload = node.onreadystatechange = function(){
-            if ( !done &&
-                    ( !this.readyState ||
-                       this.readyState === 'loaded' ||
-                       this.readyState === 'complete' )
-            ){
-                // clear
-                done = true;
-                clearTimeout( timer );
-                node.onload = node.onreadystatechange = null;
-
-                callback();
-            }
-        };
-
-        node.onerror = function(){
-            clearTimeout( timer );
-            head.removeChild( node );
-            callback( new Error( 'Load Fail' ) );
-        };
-
-        baseElement ?
-            head.insertBefore(node, baseElement) :
-            head.appendChild(node);
-    }
-})(G);
-(function (G) {
-    var doc = document;
-    var head = doc.head || doc.getElementsByTagName('head')[0] || doc.documentElement;
-
-    // `onload` event is supported in WebKit since 535.23
-    // Ref:
-    //  - https://bugs.webkit.org/show_activity.cgi?id=38995
-    var isOldWebKit = +navigator.userAgent.replace(/.*AppleWebKit\/(\d+)\..*/, '$1') < 536;
-
-    // `onload/onerror` event is supported since Firefox 9.0
-    // Ref:
-    //  - https://bugzilla.mozilla.org/show_bug.cgi?id=185236
-    //  - https://developer.mozilla.org/en/HTML/Element/link#Stylesheet_load_events
-    var isOldFirefox = window.navigator.userAgent.indexOf('Firefox') > 0 &&
-        !('onload' in document.createElement('link'));
-
-    G.Loader.register(/\.css/, function ( module ) {
-        var self = this;
-        var node = doc.createElement( 'link' );
-        var timer;
-        node.setAttribute( 'type', 'text/css' );
-        node.setAttribute( 'href', module.url );
-        node.setAttribute( 'rel', 'stylesheet' );
-
-        if ( !isOldWebKit && !isOldFirefox ) {
-            node.onload = onCSSLoad;
-            node.onerror = function () {
-                clearTimeout( timer );
-                head.removeChild( node );
-                self.fail( new Error( 'Load Fail' ) );
-            };
-        } else {
-            setTimeout(function() {
-                poll(node, onCSSLoad);
-            }, 0); // Begin after node insertion
-        }
-
-        module.status = G.Module.STATUS.FETCHING;
-        head.appendChild(node);
-
-        timer = setTimeout(function () {
-            head.removeChild(node);
-            self.fail( new Error( 'Load timeout' ) );
-        }, 30000); // 30s
-
-        function onCSSLoad() {
-            clearTimeout( timer );
-            if (module.status === G.Module.STATUS.FETCHING) {
-                module.status = G.Module.STATUS.FETCHED;
-            }
-            self.compile();
-        }
-
-        function poll(node, callback) {
-            var isLoaded;
-            if ( isOldWebKit ) {                // for WebKit < 536
-                if ( node.sheet ) {
-                    isLoaded = true;
-                }
-            } else if ( node.sheet ) {       // for Firefox < 9.0
-                try {
-                    if ( node.sheet.cssRules ) {
-                        isLoaded = true;
-                    }
-                } catch ( ex ) {
-                // The value of `ex.name` is changed from
-                // 'NS_ERROR_DOM_SECURITY_ERR' to 'SecurityError' since Firefox 13.0
-                // But Firefox is less than 9.0 in here, So it is ok to just rely on
-                // 'NS_ERROR_DOM_SECURITY_ERR'
-                    if (ex.name === 'NS_ERROR_DOM_SECURITY_ERR') {
-                        isLoaded = true;
-                    }
-                }
-            }
-
-            setTimeout(function() {
-                if (isLoaded) {
-                    // Place callback in here due to giving time for style rendering.
-                    callback();
-                } else {
-                    poll(node, callback);
-                }
-            }, 1);
-        }
-
-        return node;
+            });
+        });
     });
 })(G);

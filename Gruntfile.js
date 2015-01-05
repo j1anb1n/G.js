@@ -27,8 +27,10 @@ module.exports = function(grunt) {
                         "src/deferred.js",
                         "src/loader.js",
                         "src/module.js",
+                        "src/loader/css.js",
+                        "src/loader/amd.localstorage.js",
+                        "src/loader/amd.combo.js",
                         "src/loader/amd.js",
-                        "src/loader/css.js"
                     ],
                     'dist/g-modern.js': [
                         "src/boot.js",
@@ -37,18 +39,22 @@ module.exports = function(grunt) {
                         "src/deferred.js",
                         "src/loader.js",
                         "src/module.js",
+                        "src/loader/css.js",
+                        "src/loader/amd.localstorage.js",
+                        "src/loader/amd.combo.js",
                         "src/loader/amd.js",
-                        "src/loader/css.js"
                     ],
-                    'dist/g-localstorage.js': [
+                    '/Users/chenjianbin/developer/ng_sta/src/com/g/g-modern.js': [
                         "src/boot.js",
                         "src/config.js",
                         "src/util.js",
                         "src/deferred.js",
                         "src/loader.js",
                         "src/module.js",
+                        "src/loader/css.js",
                         "src/loader/amd.localstorage.js",
-                        "src/loader/css.js"
+                        "src/loader/amd.combo.js",
+                        "src/loader/amd.js",
                     ]
                 }
             },

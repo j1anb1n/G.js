@@ -12,7 +12,7 @@ define('specs/util/path/task.js', ['test.js'], function (require, exports, modul
                     version = now - now % (G.config('expire') || 86400);
                 }
 
-                return url.replace(id, id + '-' + version);
+                return url + '?v=' + version;
             }]
         ]
     });
@@ -21,8 +21,7 @@ define('specs/util/path/task.js', ['test.js'], function (require, exports, modul
         require.async('./a.js', function () {
 
         });
-
-        test.assert(/-123456\.js$/.test(G.Module.cache['specs/util/path/a.js'].url), 'version appended');
+        test.assert(/\.js\?v=123456$/.test(G.Module.cache['specs/util/path/a.js'].url), 'version appended');
         done();
     });
 });
