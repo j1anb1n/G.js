@@ -21,7 +21,7 @@
             return ret;
         }, []);
 
-        url = G.config('comboServer') + url.sort().join(',') + '&v=' + version;
+        url = G.config('comboServer') + url.sort().join(',') + '?v=' + version;
 
         G.util.loadScript( { url: url } );
     });

@@ -53,8 +53,9 @@
                 }
 
                 delete G.Loader.buffer[module];
-
-                G.util.loadScript( { text: content } );
+                setTimeout(function () {
+                    G.util.loadScript( { text: content } );
+                }, 0);
             });
         }
     });

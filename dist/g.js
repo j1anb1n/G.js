@@ -1577,8 +1577,9 @@ G.when = function ( defers ){
                 }
 
                 delete G.Loader.buffer[module];
-
-                G.util.loadScript( { text: content } );
+                setTimeout(function () {
+                    G.util.loadScript( { text: content } );
+                }, 0);
             });
         }
     });
@@ -1606,7 +1607,7 @@ G.when = function ( defers ){
             return ret;
         }, []);
 
-        url = G.config('comboServer') + url.sort().join(',') + '&v=' + version;
+        url = G.config('comboServer') + url.sort().join(',') + '?v=' + version;
 
         G.util.loadScript( { url: url } );
     });
