@@ -9,7 +9,7 @@
     // `onload` event is supported in WebKit since 535.23
     // Ref:
     //  - https://bugs.webkit.org/show_activity.cgi?id=38995
-    var isOldWebKit = +navigator.userAgent.replace(/.*AppleWebKit\/(\d+)\..*/, '$1') < 536;
+    var isOldWebKit = +navigator.userAgent.replace(/.*AppleWebKit.*?(\d+)\..*/i, '$1') < 536;
 
     // `onload/onerror` event is supported since Firefox 9.0
     // Ref:
